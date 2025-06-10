@@ -1,0 +1,7 @@
+*.py[cod]
+__pycache__/
+*.db
+models/
+env/
+*.session
+*_private.py

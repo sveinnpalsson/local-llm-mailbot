@@ -85,8 +85,8 @@ python profile_builder.py
 - Start LLM server:
 ```
 llama-server \
-  -m model/qwen3-14b-q4_k_m.gguf \
-  -c 32768 -n 512 -ngl 99 --jinja \
+  -m models/qwen3-gguf/Qwen3-14B-Q4_K_M.gguf \
+  -c 32768 -n 8192 -ngl 99 --jinja \ 
   --presence-penalty 1.5 --host 127.0.0.1 --port 8080
 ```
 
