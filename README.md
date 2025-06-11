@@ -1,102 +1,119 @@
-# Mail Butler
+# Mail Butler (local-llm-mailbot)
 
-Mail Butler is your private, local AI assistant for managing email, calendar events, and reminders. The idea is to allow you to continously listen to your email inboxes, sort email based on your preferences and automatically schedule reminders, calendar events and send you telegram notifications on important events. The pipeline is highly customizable, allowing you to specify in prompt templates anything you want your personal AI assistant to consider when reading your email and making decisions about scheduling tasks. 
+**Mail Butler** is a private, local AI assistant for managing your email, calendar, and reminders. It uses a one-time profile build of your contacts based on your email history, then continuously listens to your inbox—classifying messages, scheduling events, sending notifications via Telegram and potentially completes more tasks (under development). All data is encrypted locally and processed with a LLM of your choice (e.g. I run Qwen3-14B_Q4_K_M on a RTX3090).
 
-## 🚀 Key Features
-
-### 1. Privacy-First, Local Processing  
-- **On-device LLM inference** (e.g. Qwen3 via `llama-server`) runs entirely on your GPU—no third-party servers.  
-- **Encrypted SQLite** stores only metadata (no raw email content unless you opt in).  
-- **OAuth tokens** and credentials live in `env/` but you **must make sure to keep those safe** (e.g. never commit those to git).
-
-### 2. Continuous Inbox Listener  
-- Uses Gmail’s **History API** to detect new INBOX messages in real time (no full scans).  
-- **Two-stage LLM pipeline** for each email:  
-  1. **Shallow pass** → quick classification (category, importance, action, short summary)  
-  2. **Deep pass** → chain-of-thought reasoning, detailed summary, contact-aware refinement for high-priority messages  
-
-### 3. One-Time Profile Builder  
-- Scans your INBOX & SENT threads to generate **JSON profiles** for every contact:  
-  - **Role** (colleague, friend, vendor…)  
-  - **Common Topics** (keywords they discuss)  
-  - **Tone** (formal, casual)  
-  - **Relationship** (your manager, project lead)  
-  - **Notes** (other useful facts)  
-- Profiles supercharge the deep-analysis stage, letting the LLM personalize its suggestions.
-
-### 4. AI-Driven Calendar & Reminder Automation  
-- **Iterative LLM agent** reviews each high-priority email and decides whether to:  
-  - Schedule a **Calendar event** (date/time/duration)  
-  - Create a **Date-only reminder**  
-  - Skip if no action is needed  
-- **Idempotent scheduling** via a `tasks` table—events and reminders never duplicate on reruns.  
-- **Deep-link notifications**: Telegram alerts include tappable links to open the email thread in Gmail or the event in Google Calendar.
-
-### 5. Telegram Notifications
-- **Self-messages**: send through your own Telegram session (`Saved Messages`) or via a dedicated Bot API chat—your choice.  
-- **HTML formatting**: bold text, native-app intent URIs, and web links for seamless mobile hand-off.  
-- **Follow-up reminders**: scheduled ahead of deadlines (e.g. 2 days before) and delivered only once.
-
-### 6. Extensible Agent Framework  
-- Built on **function-calling** patterns: you can add new tools (RSS reader, Slack monitor, resume tailor, email composer).  
-- The LLM itself decides *which* tool to invoke next, supporting multi-step workflows like “apply for job” with human-in-the-loop prompts.  
-- **Memory & state**: encrypted persistence for tasks, contacts, and user preferences, enabling long-term assistance.
+> ⚠️ **Disclaimer:** This is a **proof-of-concept** and **not** production-grade software. Use at your own risk. The project is under active development and contains several TODOs.
 
 ---
 
-## 🛠️ Getting Started
+## 🚀 Key Features
 
-### Prerequisites
-- Python 3.11  
-- WSL2/Ubuntu or Linux for GPU + CUDA support  
-- NVIDIA RTX GPU (with 4-bit quantization)  
-- Gmail & Google Calendar OAuth credentials  
-- Telegram API credentials (Bot token or user-session `api_id`/`api_hash`)
+- **One-Time Profile Builder**  
+  Run `profile_builder.py` once to scan your Gmail INBOX/SENT threads. Generates a JSON “profile” for each contact (role, topics, tone, etc.) and saves it in the encrypted database.
 
-### Installation
-```
-git clone https://github.com/sveinnpalsson/local-llm-mailbot.git
-cd local-llm-mailbot
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+- **Continuous Inbox Listener**  
+  Run `main.py` to watch one or more of your Gmail inboxes via the History API. Each new message goes through:
+  1. **Shallow pass**: quick categorization, importance scoring, summary  
+  2. **Deep pass** (high-priority only): chain-of-thought reasoning, detailed summary, follow-up suggestions
 
-### Configuration
-- Copy your OAuth JSONs into env/credentials_gmail.json and env/credentials_calendar.json
-- Export environment variables:
+- **AI-Driven Scheduling**  
+  Automatically creates Google Calendar events or reminders for important emails. Idempotent scheduling tracked in the `tasks` table—no duplicate events on reruns.
 
-```
-export GOOGLE_GMAIL_CREDENTIALS="env/credentials_gmail.json"
-export GOOGLE_CAL_CREDENTIALS="env/credentials_calendar.json"
-export TG_API_ID=1234567
-export TG_API_HASH="abcdef..."
-export TELEGRAM_CHAT_ID="-1001234567890"
-```
+- **Encrypted Data Storage**  
+  Uses an encrypted SQLite database (`mailbot.db`) via `sqlcipher3`.  
+  - Key taken from `MAILBOT_DB_PASSWORD` env var  
+  - Main tables:  
+    - `emails` (ID, date, sender, subject, summary, classification)  
+    - `contacts` (profile JSON per address)  
+    - `tasks` (scheduled events/reminders)  
+    - `raw_messages` (cached full JSON payloads)  
+    - `ignore_rules` (patterns/addresses to skip)
 
-- Download & quantize your LLM into model/ (e.g. Qwen3-14B-Q4_K_M.gguf).
+- **Local LLM Inference**  
+  All AI processing uses your GPU via [llama-server](https://github.com/guillaume-be/rust-llm-server) and [llama-cli](https://github.com/jjxtra/llama.cpp/tree/master/apps/llama_cli). I recommend the [Qwen3-14B-GGUF model](https://huggingface.co/Qwen/Qwen3-14B-GGUF) (Apache-2.0).
 
-### Usage
-- Profile Builder (one-time):
-```
-python profile_builder.py
-```
+- **Telegram Notifications**  
+  Sends alerts through Telethon (or your Bot token) with Markdown/HTML links to emails or events. (End-to-end encryption is a TODO.)
 
-- Start LLM server:
-```
-llama-server \
-  -m models/qwen3-gguf/Qwen3-14B-Q4_K_M.gguf \
-  -c 32768 -n 8192 -ngl 99 --jinja \ 
-  --presence-penalty 1.5 --host 127.0.0.1 --port 8080
-```
+---
 
-- Run Continuous Listener:
-```
-python continuous_main.py
-```
+## 📋 Prerequisites
 
-### 🤝 Contributing
-Contributions welcome!
+- **OS:** Linux (WSL2/Ubuntu) with NVIDIA GPU & CUDA  
+- **Python:** 3.11  
+- **Google APIs:** Gmail & Calendar OAuth 2.0 credentials  
+- **Telegram API:** Bot token or API ID/Hash  
+- **LLM Model:** Quantized GGUF model (e.g. Qwen3-14B) in `model/`
 
-### 📝 License
-This project is licensed under the MIT License. See LICENSE for details.
+---
+
+## ⚙️ Setup Instructions
+
+1. **Clone & install**  
+   ```bash  
+   git clone https://github.com/sveinnpalsson/local-llm-mailbot.git  
+   cd local-llm-mailbot  
+   python3.11 -m venv .venv  
+   source .venv/bin/activate  
+   pip install -r requirements.txt  
+   ```
+
+2. **Google OAuth**  
+   - In Google Cloud Console, create OAuth 2.0 credentials for **Gmail API** and **Calendar API**.  
+   - Download the JSON files and place them in `env/` (create it if missing):  
+     - `env/credentials_gmail.json`  
+     - `env/credentials_calendar.json`  
+   - Copy `config_private_template.py` → `config_private.py` and setup your account details:
+   - On first run (`profile_builder.py` or `main.py`), you’ll be prompted to authorize. Token files (e.g. `env/token_gmail.json`) are then auto-generated.
+
+3. **Telegram Setup (optional)**  
+   - Get a **Bot Token** from BotFather **or** your personal API ID/Hash from https://my.telegram.org.  
+   - In `config_private.py`, set either `TELEGRAM_BOT_TOKEN` **or** both `TELEGRAM_API_ID` & `TELEGRAM_API_HASH`, plus `TELEGRAM_CHANNEL` (chat ID or “Saved Messages”).  
+
+4. **Model Setup**  
+   - Download your GGUF model (e.g. `Qwen3-14B-Q4_K_M.gguf`) into `models/`.  
+   - Adjust the `llama-server` launch command:  
+     ```bash  
+     llama-server \
+       -m models/Qwen3-14B-Q4_K_M.gguf \
+       -c 32768 -n 8192 -ngl 99 --jinja \
+       --presence-penalty 1.5 --host 127.0.0.1 --port 8080
+     ```
+
+---
+
+## 🚦 Usage
+
+
+1. **Start LLM Server**  
+   (See Model Setup above.)
+
+2. **Build Contact Profiles**  
+   ```bash  
+   python profile_builder.py  
+   ```
+
+3. **Run the Listener**  
+   ```bash  
+   python main.py  
+   ```
+
+Logs will show classification/scheduling steps and Telegram notifications when tasks are created.
+
+---
+
+## 🛠 Development Notes
+
+- **Status:** Active development; many features marked TODO (e.g. end-to-end Telegram encryption, live contact updates).  
+- **Extensibility:** The `classifier.py` framework lets you add new “tools” (RSS, Slack, etc.) for the agent to invoke.  
+- **Debugging:** Raw email JSONs are cached in `raw_messages` for inspection.
+
+---
+
+## 📜 License
+
+Released under the **MIT License** (see `LICENSE`). All dependencies are MIT or Apache-2.0-compatible.
+
+---
+
+**Enjoy exploring your personal mail AI assistant!**
