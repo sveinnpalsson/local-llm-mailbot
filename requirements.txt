@@ -1,0 +1,12 @@
+beautifulsoup4==4.12.2
+google-api-python-client==2.70.0
+google-auth==2.18.0
+google-auth-oauthlib==1.0.0
+transformers==4.37.0
+accelerate==0.22.0
+bitsandbytes==0.41.0
+requests==2.31.0
+sqlcipher3-binary==0.5.4
+PyMuPDF==1.25.5
+Telethon==1.37.0
+tqdm==4.66.1
