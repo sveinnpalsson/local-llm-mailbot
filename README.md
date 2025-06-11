@@ -50,21 +50,23 @@
 ## ⚙️ Setup Instructions
 
 1. **Clone & install**  
-   ```bash  
+   ```  
    git clone https://github.com/sveinnpalsson/local-llm-mailbot.git  
    cd local-llm-mailbot  
    python3.11 -m venv .venv  
    source .venv/bin/activate  
+   pip install --upgrade pip setuptools  
+   pip install -e .  
    pip install -r requirements.txt  
    ```
 
 2. **Google OAuth**  
    - In Google Cloud Console, create OAuth 2.0 credentials for **Gmail API** and **Calendar API**.  
    - Download the JSON files and place them in `env/` (create it if missing):  
-     - `env/credentials_gmail.json`  
+     - `env/credentials.json`  
      - `env/credentials_calendar.json`  
    - Copy `config_private_template.py` → `config_private.py` and setup your account details:
-   - On first run (`profile_builder.py` or `main.py`), you’ll be prompted to authorize. Token files (e.g. `env/token_gmail.json`) are then auto-generated.
+   - On first run (`profile_builder.py` or `main.py`), you’ll be prompted to authorize. Token files (e.g. `env/token_<account_name>.json`) are then auto-generated.
 
 3. **Telegram Setup (optional)**  
    - Get a **Bot Token** from BotFather **or** your personal API ID/Hash from https://my.telegram.org.  
@@ -73,7 +75,7 @@
 4. **Model Setup**  
    - Download your GGUF model (e.g. `Qwen3-14B-Q4_K_M.gguf`) into `models/`.  
    - Adjust the `llama-server` launch command:  
-     ```bash  
+     ```  
      llama-server \
        -m models/Qwen3-14B-Q4_K_M.gguf \
        -c 32768 -n 8192 -ngl 99 --jinja \
@@ -89,13 +91,13 @@
    (See Model Setup above.)
 
 2. **Build Contact Profiles**  
-   ```bash  
-   python profile_builder.py  
+   ```  
+   python -m mailbot.profile_builder  
    ```
 
 3. **Run the Listener**  
-   ```bash  
-   python main.py  
+   ```  
+    python -m mailbot.main  
    ```
 
 Logs will show classification/scheduling steps and Telegram notifications when tasks are created.
@@ -116,4 +118,3 @@ Released under the **MIT License** (see `LICENSE`). All dependencies are MIT or 
 
 ---
 
-**Enjoy exploring your personal mail AI assistant!**

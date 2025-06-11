@@ -10,8 +10,8 @@ ACCOUNTS = [
         "email": "example@gmail.com",
         "credentials_file": "env/credentials.json",
         "token_file":       "env/token_main.json",
-        "calendar_credentials_file": "env/cal_credentials.json",
-        "calendar_token_file":       "env/cal_token.json"
+        "calendar_credentials_file": "env/credentials_calendar.json",
+        "calendar_token_file":       "env/token_calendar.json"
     },
     {
         "name": "secondary",
