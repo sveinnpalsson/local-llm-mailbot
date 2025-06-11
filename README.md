@@ -30,7 +30,7 @@
     - `ignore_rules` (patterns/addresses to skip)
 
 - **Local LLM Inference**  
-  All AI processing uses your GPU via [llama-server](https://github.com/guillaume-be/rust-llm-server) and [llama-cli](https://github.com/jjxtra/llama.cpp/tree/master/apps/llama_cli). I recommend the [Qwen3-14B-GGUF model](https://huggingface.co/Qwen/Qwen3-14B-GGUF) (Apache-2.0).
+  All AI processing uses your GPU via [llama-server](https://github.com/ggml-org/llama.cpp) and [llama-cli](https://github.com/ggml-org/llama.cpp). I recommend the [Qwen3-14B-GGUF model](https://huggingface.co/Qwen/Qwen3-14B-GGUF) (Apache-2.0).
 
 - **Telegram Notifications**  
   Sends alerts through Telethon (or your Bot token) with Markdown/HTML links to emails or events. (End-to-end encryption is a TODO.)
