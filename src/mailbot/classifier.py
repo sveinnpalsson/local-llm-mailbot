@@ -1,22 +1,32 @@
-# classifier.py
-
-import json, requests, re
+import json
 import logging
-from config import (
-    LLAMA_SERVER_URL, LLAMA_SERVER_MODEL,
-    INITIAL_MAX_INPUT_TOKENS, INITIAL_MAX_OUTPUT_TOKENS,
-    DEEP_MAX_INPUT_TOKENS,    DEEP_MAX_OUTPUT_TOKENS,
-    DEEP_THRESHOLD_IMPORTANCE
-)
-from config_private import ACCOUNTS, USER_PERSONAL_IGNORE_CLAUSE, USER_PROFILE_LLM_PROMPT, USER_PROFILE_LLM_PROMPT_DEEP
-from datetime import datetime
-import time
-from typing import List, Dict
-from db import get_conn, get_ignore_rules
 import os
+import re
+import time
+from datetime import datetime
+from typing import Dict, List
+
+import requests
+
+from .config import (
+    DEEP_MAX_INPUT_TOKENS,
+    DEEP_MAX_OUTPUT_TOKENS,
+    DEEP_THRESHOLD_IMPORTANCE,
+    INITIAL_MAX_INPUT_TOKENS,
+    INITIAL_MAX_OUTPUT_TOKENS,
+    LABELS,
+    LLAMA_SERVER_MODEL,
+    LLAMA_SERVER_URL,
+)
+from .config_private import (
+    ACCOUNTS,
+    USER_PERSONAL_IGNORE_CLAUSE,
+    USER_PROFILE_LLM_PROMPT,
+    USER_PROFILE_LLM_PROMPT_DEEP,
+)
+from .db import get_conn, get_ignore_rules
 
 
-LABELS = list(ACCOUNTS[0]["LABEL_IDS"].keys())
 conn = get_conn()
 
 # TODO: This part is under construction - we want ignore rules to be read from the database but we currently never add ignore rules to it.

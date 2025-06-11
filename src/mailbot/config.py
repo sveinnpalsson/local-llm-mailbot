@@ -27,7 +27,7 @@ LLAMA_CLI_PATH = os.environ["LLAMA_CLI_PATH"]
 DB_PATH     = "mailbot.db"
 
 # Email labels
-LABEL_IDS = ["Important", "Promotions", "Social", "Spam", "Receipts"]
+LABELS = ["Important", "Promotions", "Social", "Spam", "Receipts"]
 
 # Keep your DB_PASSWORD in env
 DB_PASSWORD = os.environ.get("MAILBOT_DB_PASSWORD", "CHANGE_ME")

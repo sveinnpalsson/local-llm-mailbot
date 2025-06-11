@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime
-from classifier import llama_chat
+from .classifier import llama_chat
 from tqdm import tqdm
 
 SYSTEM = {

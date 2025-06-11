@@ -1,42 +1,52 @@
-import logging
-from datetime import timedelta
-from datetime import datetime, date
-from collections import defaultdict
-from classifier   import initial_classify, deep_analyze
-from db import (
-    get_conn, get_seen_ids,
-    get_cached_ids, cache_raw_message, load_raw_message, mark_email, get_contact_profile,
-    reset_emails_table, reset_tasks_table, add_task, mark_task_sent, get_due_tasks
-)
-from gmail_client import (
-    get_service, fetch_message_ids,
-    fetch_full_message_payload, get_full_message_from_payload
-)
-from googleapiclient.errors import HttpError
-
-from telegram_message        import send_telegram
-from config            import (
-    ACCOUNTS,
-    DEEP_THRESHOLD_IMPORTANCE,
-    MIN_IMPORTANCE_FOR_ALERT,
-    LOOKBACK_WEEKS,
-    CALENDAR_IMPORTANCE_THRESHOLD,
-    POLL_INTERVAL_SECONDS,
-    PLANNING_INTERVAL_HOURS
-)
-import os
 import json
-from tqdm import tqdm
-from calendar_client   import get_calendar_service, create_calendar_event
-from calendar_planner  import plan_calendar_actions
-from config            import LOOKBACK_WEEKS, DB_PASSWORD
-from config_private import ACCOUNTS
+import logging
+import os
 import time
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s: %(message)s")
+from googleapiclient.errors import HttpError
+from tqdm import tqdm
 
-# ——— Configuration ———
+from .calendar_client    import create_calendar_event, get_calendar_service
+from .calendar_planner   import plan_calendar_actions
+from .classifier         import deep_analyze, initial_classify
+from .config             import (
+    CALENDAR_IMPORTANCE_THRESHOLD,
+    DEEP_THRESHOLD_IMPORTANCE,
+    DB_PASSWORD,
+    LOOKBACK_WEEKS,
+    MIN_IMPORTANCE_FOR_ALERT,
+    PLANNING_INTERVAL_HOURS,
+    POLL_INTERVAL_SECONDS,
+)
+from .config_private     import ACCOUNTS
+from .db                 import (
+    add_task,
+    cache_raw_message,
+    get_cached_ids,
+    get_contact_profile,
+    get_conn,
+    get_due_tasks,
+    get_seen_ids,
+    load_raw_message,
+    mark_email,
+    mark_task_sent,
+    reset_emails_table,
+    reset_tasks_table,
+)
+from .gmail_client       import (
+    fetch_full_message_payload,
+    fetch_message_ids,
+    get_full_message_from_payload,
+    get_service,
+)
+from .telegram_message   import send_telegram
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s: %(message)s"
+)
 
 # Number of messages per LLM batch
 BATCH_SIZE = 10

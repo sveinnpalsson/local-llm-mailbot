@@ -1,6 +1,6 @@
 import json
 import requests
-from config import LLAMA_SERVER_URL, LLAMA_SERVER_MODEL
+from .config import LLAMA_SERVER_URL, LLAMA_SERVER_MODEL
 
 _system_summarize = [
   { "role": "system", "content":

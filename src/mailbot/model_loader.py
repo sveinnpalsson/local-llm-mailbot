@@ -1,5 +1,5 @@
 import subprocess
-from config import MODEL_PATH, LLAMA_CLI_PATH
+from .config import MODEL_PATH, LLAMA_CLI_PATH
 
 def load_model():
     def generate(prompt: str, max_new_tokens: int = 32):

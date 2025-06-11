@@ -1,29 +1,33 @@
-# profile_builder.py
-
 import json
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
-from gmail_client import (
-    get_service,
-    fetch_messages,
-    fetch_message_ids,
-    fetch_full_message_payload,
-    get_full_message_from_payload
-)
-from db import (
-    get_conn,
-    get_cached_ids,
-    cache_raw_message,
-    load_raw_message,
-    update_contact,
-    get_all_contacts,
-    set_contact_profile
-)
-from classifier import llama_chat
-from config_private import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP
 from tqdm import tqdm
+
+from .classifier       import llama_chat
+from .config_private   import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP
+from .db               import (
+    cache_raw_message,
+    get_all_contacts,
+    get_cached_ids,
+    get_conn,
+    load_raw_message,
+    set_contact_profile,
+    update_contact,
+)
+from .gmail_client     import (
+    get_service,
+    fetch_full_message_payload,
+    fetch_message_ids,
+    fetch_messages,
+    get_full_message_from_payload,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s: %(message)s"
+)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s: %(message)s")
@@ -130,7 +134,7 @@ def build_profiles(account):
         ]
 
         # Call the LLM
-        prof = llama_chat(messages, max_tokens=8192)
+        prof = llama_chat(messages, max_tokens=8192)[0]
         if isinstance(prof, dict):
             set_contact_profile(conn, email, prof)
             logging.info("Profile set for %s: %s", email, prof)
@@ -139,11 +143,13 @@ def build_profiles(account):
 
 
 if __name__ == "__main__":
-    from main import ensure_tokens
+    from .main import ensure_tokens
+    logging.info("Authenticating")
     if not ensure_tokens():
         raise
     
     for acct in ACCOUNTS:
+        logging.info(f"Running profile builder for account: {acct['email']}")
         try:
             build_profiles(acct)
         except Exception:

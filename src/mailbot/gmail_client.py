@@ -160,7 +160,8 @@ def extract_text_from_pdf(data: bytes) -> str:
 
 def get_full_message_from_payload(
     service,
-    raw: dict
+    raw: dict,
+    load_attachments: bool = False
 ) -> Tuple[str, str, str, str, str, str, Optional[str], Optional[datetime]]:
     """
     Now requires:
@@ -198,7 +199,7 @@ def get_full_message_from_payload(
             elif mt == 'text/html' and data:
                 html = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
                 collected['html'] += html + "\n"
-            elif fn.lower().endswith('.pdf') and 'attachmentId' in body:
+            elif fn.lower().endswith('.pdf') and 'attachmentId' in body and load_attachments:
                 # **Use the passed-in service** here:
                 request = lambda: service.users().messages().attachments().get(userId='me', messageId=raw["id"], id=body["attachmentId"])
                 att = safe_execute(request)

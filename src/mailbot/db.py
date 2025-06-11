@@ -1,6 +1,6 @@
 import os
 from sqlcipher3 import dbapi2 as sqlite
-from config import DB_PATH, DB_PASSWORD
+from .config import DB_PATH, DB_PASSWORD
 from datetime import datetime
 import json
 
