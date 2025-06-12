@@ -1,6 +1,6 @@
-# Mail Butler (local-llm-mailbot)
+# Local LLM Mailbot
 
-**Mail Butler** is a private, local AI assistant for managing your email, calendar, and reminders. It uses a one-time profile build of your contacts based on your email history, then continuously listens to your inbox—classifying messages, scheduling events, sending notifications via Telegram and potentially completes more tasks (under development). All data is encrypted locally and processed with a LLM of your choice (e.g. I run Qwen3-14B_Q4_K_M on a RTX3090).
+**Local LLM Mailbot** is a private, local AI assistant for managing your email, calendar, and reminders. It uses a one-time profile build of your contacts based on your email history, then continuously listens to your inbox—classifying messages, scheduling events, sending notifications via Telegram and potentially completes more tasks (under development). All data is encrypted locally and processed with a LLM of your choice (e.g. I run Qwen3-14B_Q4_K_M on a RTX3090 card).
 
 > ⚠️ **Disclaimer:** This is a **proof-of-concept** and **not** production-grade software. Use at your own risk. The project is under active development and contains several TODOs.
 

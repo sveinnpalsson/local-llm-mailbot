@@ -34,14 +34,17 @@ from .db                 import (
     mark_task_sent,
     reset_emails_table,
     reset_tasks_table,
+    set_contact_profile
 )
 from .gmail_client       import (
     fetch_full_message_payload,
     fetch_message_ids,
     get_full_message_from_payload,
     get_service,
+    ensure_tokens
 )
 from .telegram_message   import send_telegram
+from .profile_builder    import update_contact_profile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,31 +55,7 @@ logging.basicConfig(
 BATCH_SIZE = 10
 N_MAX = 20
 SEND_TELEGRAM_NOTIFICATIONS = False #TODO: Implement with end-to-end encryption
-
-def ensure_tokens() -> bool:
-    """
-    For each account in ACCOUNTS, if its token file doesn't exist,
-    run the OAuth flow to create it, then tell the user to re-run.
-    Returns True if all tokens already existed, False if new ones were made.
-    """
-    missing = []
-    for acct in ACCOUNTS:
-        if not os.path.exists(acct["token_file"]):
-            missing.append(acct)
-
-    if not missing:
-        return True
-
-    for acct in missing:
-        email = acct["email"]
-        logging.info("→ Generating OAuth token for %s …", email)
-        # This call will open your browser (or console) to complete the OAuth flow
-        get_service(acct["credentials_file"], acct["token_file"])
-        logging.info("✓ Token saved to %s", acct["token_file"])
-
-    print(f"\nCreated {len(missing)} new token file(s).")
-    print("Please re-run this script now that all tokens exist.")
-    return False
+update_profiles = True 
 
 def run_due_reminders(conn):
     now = datetime.now()
@@ -150,10 +129,6 @@ def process_message(svc, conn, acct, mid, spammers):
         print(f'// SPAM // {date_iso} FROM: {frm}')
         return None
 
-    # update contacts #TODO: needs implementation - want to update contact info on the fly
-    # if msg_dt:
-    #     update_contact(conn, frm, msg_dt)
-    #     update_contact(conn, to_addr, msg_dt)
 
     # shallow classify
     init = initial_classify(subject, snippet, frm, to_addr, date_iso, msg_dt)
@@ -213,6 +188,13 @@ def process_message(svc, conn, acct, mid, spammers):
     print(f'Summary: {summary_to_print}')
     print('------------------------------------------------------')
 
+    # Update contact profile
+    if update_profiles:
+        updated_profile = update_contact_profile(conn, frm, rec)
+        __import__('IPython').embed()
+        if updated_profile:
+            set_contact_profile(conn, frm, updated_profile)
+        
     # write to database
     mark_email(conn, rec)
 

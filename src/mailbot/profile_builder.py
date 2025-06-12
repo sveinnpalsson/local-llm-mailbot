@@ -15,6 +15,7 @@ from .db               import (
     load_raw_message,
     set_contact_profile,
     update_contact,
+    get_contact_profile
 )
 from .gmail_client     import (
     get_service,
@@ -40,9 +41,17 @@ SYSTEM_PROFILE_PROMPT = (
     "  • common_topics: an array of keywords discussed\n"
     "  • tone: “formal” or “casual”\n"
     "  • relationship: a phrase like “your project manager”\n"
-    "  • notes: any other brief, useful observations\n"
+    "  • notes: any other brief, useful observations about this contact\n"
     f" {USER_PROFILE_LLM_PROMPT_DEEP}\n"
     "Do not output any commentary or anything outside the JSON.\n"
+)
+
+SYSTEM_PROFILE_UPDATE_PROMPT = (
+    "You are a contact‐profiling assistant.  "
+    "Given the current profile of a contact and the most recent email received from them, "
+    "you must produce *only* a JSON object with an updated profile (same fields as the provided profile):\n"
+    "If you believe the current profile does NOT need to be updated, you may output an empty json: \{\}."
+    ".\n"
 )
 
 
@@ -141,9 +150,40 @@ def build_profiles(account):
         else:
             logging.warning("Failed to build profile for %s", email)
 
+def update_contact_profile(conn, email: str, rec: dict) -> dict:
+    """Prompt the LLM to update the contact profile for this email."""
+    old_profile = get_contact_profile(conn, email) or {}
+    old_profile = json.dumps(old_profile)
+    if old_profile == '{}': # Treat as a new contact
+        messages = [
+            {"role": "system", "content": SYSTEM_PROFILE_PROMPT},
+            {"role": "user",   "content":
+                "No conversation thread exists for this contact but here is an email just received from this contact:\n\n"
+                + email
+                + "\n\nRespond ONLY with the JSON object described."
+            }
+        ]
+    else: # Update contact
+        messages = [
+            {"role": "system", "content": SYSTEM_PROFILE_UPDATE_PROMPT},
+            {"role": "user",   "content":
+                "Here is the newest email:\n\n"
+                + email
+                + "\n\nContact's current profile:\n\n"
+                + old_profile
+            }
+        ]
+
+    result = llama_chat(messages, max_tokens=8192)[0]
+
+    if result and result != '{}':
+        updated_profile = result
+        return updated_profile
+    return None
+
 
 if __name__ == "__main__":
-    from .main import ensure_tokens
+    from .gmail_client import ensure_tokens
     logging.info("Authenticating")
     if not ensure_tokens():
         raise

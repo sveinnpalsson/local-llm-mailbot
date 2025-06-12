@@ -18,6 +18,8 @@ import http.client
 from typing            import Tuple, Optional, Dict, Any
 from datetime import datetime
 
+from .config_private import ACCOUNTS
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 def get_service(credentials_file: str, token_file: str):
@@ -52,6 +54,31 @@ def get_service(credentials_file: str, token_file: str):
     # 4) Build the Gmail API client
     return build('gmail', 'v1', credentials=creds)
 
+
+def ensure_tokens() -> bool:
+    """
+    For each account in ACCOUNTS, if its token file doesn't exist,
+    run the OAuth flow to create it, then tell the user to re-run.
+    Returns True if all tokens already existed, False if new ones were made.
+    """
+    missing = []
+    for acct in ACCOUNTS:
+        if not os.path.exists(acct["token_file"]):
+            missing.append(acct)
+
+    if not missing:
+        return True
+
+    for acct in missing:
+        email = acct["email"]
+        logging.info("→ Generating OAuth token for %s …", email)
+        # This call will open your browser (or console) to complete the OAuth flow
+        get_service(acct["credentials_file"], acct["token_file"])
+        logging.info("✓ Token saved to %s", acct["token_file"])
+
+    print(f"\nCreated {len(missing)} new token file(s).")
+    print("Please re-run this script now that all tokens exist.")
+    return False
 
 
 def safe_execute(callable_execute, retries: int = 3, backoff: float = 1.0):
