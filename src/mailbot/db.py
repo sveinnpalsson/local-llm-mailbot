@@ -6,9 +6,11 @@ import json
 
 def get_conn():
     # Open (and decrypt) the database file
-    conn = sqlite.connect(DB_PATH)
+    conn = sqlite.connect(DB_PATH, 
+        timeout=30.0,            # wait up to 30s for any lock
+        check_same_thread=False, # allow multiple threads
+    )
     conn.execute(f"PRAGMA key='{DB_PASSWORD}';")
-
     # Ensure all tables exist (won't overwrite existing ones)
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS emails (
@@ -168,15 +170,17 @@ def set_contact_profile(conn, email: str, profile: dict):
 def mark_email(conn, rec):
     conn.execute("""
       INSERT OR REPLACE INTO emails
-      (msg_id, date, from_addr, to_addr, thread_id, subject, snippet,
-       category, importance, action, summary, deep_summary)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (msg_id, date, from_addr, to_addr, thread_id,
+       subject, snippet, category, importance,
+       action, summary, deep_summary, agent_output)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
       rec["msg_id"], rec["date"], rec["from"], rec["to"], rec["thread_id"],
-      rec["subject"],   rec["snippet"],
-      rec["category"],  rec["importance"],
-      rec["action"],    rec["summary"],
-      rec.get("deep_summary","")  # new
+      rec["subject"], rec["snippet"],
+      rec["category"], rec["importance"],
+      rec["action"], rec["summary"],
+      rec.get("deep_summary",""),
+      rec.get("agent_output","")
     ))
     conn.commit()
 

@@ -9,7 +9,7 @@ DEEP_MAX_INPUT_TOKENS     = 6000    # for full-body + attachments
 DEEP_MAX_OUTPUT_TOKENS    = 8192
 
 # Maximum time period to consider when scanning mailboxes
-LOOKBACK_WEEKS = 8
+NUM_MESSAGES_LOOKBACK = 50
 
 # Which initial‐importance triggers a “deep” pass?
 DEEP_THRESHOLD_IMPORTANCE = 7
@@ -31,3 +31,7 @@ LABELS = ["Important", "Promotions", "Social", "Spam", "Receipts"]
 
 # Keep your DB_PASSWORD in env
 DB_PASSWORD = os.environ.get("MAILBOT_DB_PASSWORD", "CHANGE_ME")
+
+# Agent settings
+AGENT_ALWAYS_ASK_HUMAN = True
+

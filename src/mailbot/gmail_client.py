@@ -81,6 +81,21 @@ def ensure_tokens() -> bool:
     return False
 
 
+def fetch_history_with_retry(svc, **kwargs):
+    delay = 1
+    for attempt in range(5):  # e.g. up to 5 retries
+        try:
+            return svc.users().history().list(**kwargs).execute()
+        except HttpError as e:
+            status = getattr(e, 'status_code', None) or e.resp.status
+            if status == 503:
+                logging.warning("Gmail 503 backendError; retrying in %ds…", delay)
+                time.sleep(delay)
+                delay = min(delay * 2, 30)
+                continue
+            raise
+    raise RuntimeError("Exceeded retries fetching Gmail history")
+
 def safe_execute(callable_execute, retries: int = 3, backoff: float = 1.0):
     """
     Calls `callable_execute()`, which should return an object with .execute().

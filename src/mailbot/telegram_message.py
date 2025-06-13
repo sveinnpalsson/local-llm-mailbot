@@ -3,9 +3,9 @@ from telethon import TelegramClient
 import requests
 import re
 import html
-from .config_private import TELEGRAM_BOT_TOKEN, TELEGRAM_API_HASH, TELEGRAM_API_ID, TELEGRAM_PHONE_NUMBER, TELEGRAM_CHANNEL, TELEGRAM_SESSION_NAME
+from typing import Dict, List, Any
 
-client = TelegramClient(TELEGRAM_SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+from .config_private import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL
 
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
@@ -35,10 +35,26 @@ def send_telegram(text: str, html: bool = False):
     resp.raise_for_status()
     return resp.json()
 
+
+def send_telegram_with_buttons(text: str, buttons: List[Dict[str,str]]):
+    """
+    Use Telegram Bot API to send a message with inline keyboard.
+    Buttons: [{"text": "...", "callback_data": "..."}]
+    """
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHANNEL,
+        "text": text,
+        "reply_markup": {"inline_keyboard": [buttons]}
+    }
+    requests.post(url, json=payload)
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print("Usage: python telegram_message.py \"<message>\"")
         sys.exit(1)
+        
     # Grab the message from argv
     msg = sys.argv[1]
     # Run the whole thing

@@ -10,3 +10,5 @@ sqlcipher3-binary==0.5.4
 PyMuPDF==1.25.5
 Telethon==1.37.0
 tqdm==4.66.1
+smolagents[openai]
+transformers>=4.30.0
