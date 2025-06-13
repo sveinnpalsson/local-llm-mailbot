@@ -11,13 +11,13 @@
 - **One-Time Profile Builder**  
   Run `profile_builder.py` once to scan your Gmail INBOX/SENT threads. Generates a JSON “profile” for each contact (role, topics, tone, etc.) and saves it in the encrypted database.
 
+- **Agent-Driven Email Handling**  
+  We now use the [smolagents](https://github.com/huggingface/smolagents) framework to drive email “tools” (mark-spam, unsubscribe, schedule reminders/events, web search, etc.) via an LLM.  Irreversible actions are gated by a human-in-the-loop confirmation (✅/❌ inline buttons) sent over Telegram. The agent can contact the user and waits for their response before proceeding.
+
 - **Continuous Inbox Listener**  
   Run `main.py` to watch one or more of your Gmail inboxes via the History API. Each new message goes through:
   1. **Shallow pass**: quick categorization, importance scoring, summary  
   2. **Deep pass** (high-priority only): chain-of-thought reasoning, detailed summary, follow-up suggestions
-
-- **AI-Driven Scheduling**  
-  Automatically creates Google Calendar events or reminders for important emails. Idempotent scheduling tracked in the `tasks` table—no duplicate events on reruns.
 
 - **Encrypted Data Storage**  
   Uses an encrypted SQLite database (`mailbot.db`) via `sqlcipher3`.  
