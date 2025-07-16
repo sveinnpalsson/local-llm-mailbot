@@ -107,8 +107,7 @@ Logs will show classification/scheduling steps and Telegram notifications when t
 ## 🛠 Development Notes
 
 - **Status:** Active development; many features marked TODO (e.g. end-to-end Telegram encryption, live contact updates).  
-- **Extensibility:** The `classifier.py` framework lets you add new “tools” (RSS, Slack, etc.) for the agent to invoke.  
-- **Debugging:** Raw email JSONs are cached in `raw_messages` for inspection.
+- **Extensibility:** The `task_agnets.py` framework lets you add new “tools” (RSS, Slack, etc.) for the agent to invoke.  
 
 ---
 
