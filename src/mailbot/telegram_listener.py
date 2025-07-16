@@ -20,8 +20,8 @@ def _poll_updates():
     while True:
         try:
             params = {"offset": _update_offset, "timeout": 30}
-            resp = requests.get(f"{BASE_URL}/getUpdates", params=params, timeout=40)
-            data = resp.json().get("result", [])
+            with requests.get(f"{BASE_URL}/getUpdates", params=params, timeout=40) as resp:
+                data = resp.json().get("result", [])
         except Exception as e:
             print("❌ Poll error:", e)
             time.sleep(1)

@@ -78,7 +78,7 @@ def process_message(svc, conn, acct, mid, spammers):
 
     # now we know date_iso—spam skip print:
     if frm in spammers:
-        print(f'// SPAM // {date_iso} FROM: {frm}')
+        print(f'// SPAM // {date_iso} FROM: {frm} SUBJECT: {subject}')
         return None
 
     # shallow classify
@@ -139,6 +139,9 @@ def process_message(svc, conn, acct, mid, spammers):
     print(f'Summary: {summary_to_print}')
     print('------------------------------------------------------')
     
+    rec["agent_output"] = ""
+    mark_email(conn, rec)
+
     # Run agent to handle actions
     agent_result = handle_action(rec)
     rec["agent_output"] = agent_result or ""
@@ -185,6 +188,7 @@ def main_loop():
     # Build service clients & backfill recent messages
     for acct in ACCOUNTS:
         email = acct["email"]
+        print(f"Setting up gmail service for {email}")
         svc   = get_service(acct["credentials_file"], acct["token_file"])
         services[email] = svc
 
