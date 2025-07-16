@@ -1,6 +1,9 @@
 import os
 import base64
 import fitz
+import pwd
+import resource
+
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 from googleapiclient.discovery import build
@@ -15,8 +18,9 @@ import time
 import logging
 import ssl
 import http.client
-from typing            import Tuple, Optional, Dict, Any
+from typing            import Tuple, Optional, Dict, Any, List
 from datetime import datetime
+import multiprocessing
 
 from .config_private import ACCOUNTS
 
@@ -116,32 +120,50 @@ def safe_execute(callable_execute, retries: int = 3, backoff: float = 1.0):
                 continue
             raise
 
-def _walk_parts(parts, service, msg_id, collected):
+def _walk_parts(
+    parts: List[Dict],
+    service,
+    msg_id: str,
+    collected: Dict[str, List],
+    allowed_attachments: List[str] = None
+):
     """
     Recursively walk MIME parts, appending text to collected['plain']
-    or collected['html'], and attachments to collected['pdfs'].
+    or collected['html'], and attachments (by filename) into collected['pdfs'].
+    Only attachments whose filenames are in allowed_attachments will be fetched.
     """
+    MAX_PART_BYTES = 5 * 1024 * 1024  # 5 MiB per part
+    allowed_attachments = allowed_attachments or []
+
     for part in parts:
-        mime = part.get('mimeType','')
-        filename = part.get('filename','') or ""
+        mime = part.get('mimeType', '')
+        fn   = (part.get('filename') or "").lower()
         body = part.get('body', {})
         data = body.get('data')
-        if mime == 'text/plain' and data:
-            text = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-            collected['plain'] += text + "\n"
-        elif mime == 'text/html' and data:
-            html = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-            collected['html'] += html + "\n"
-        # PDF attachment
-        elif filename.lower().endswith('.pdf') and 'attachmentId' in body:
-            request = lambda: service.users().messages().attachments().get(userId='me', messageId=msg_id, id=body["attachmentId"])
-            att = safe_execute(request)
-            pdf_data = base64.urlsafe_b64decode(att['data'])
-            pdf_data = base64.urlsafe_b64decode(att['data'])
-            collected['pdfs'].append(pdf_data)
-        # If this part has children, recurse
+
+        # 1) TEXT parts
+        if mime in ("text/plain", "text/html") and data:
+            raw = base64.urlsafe_b64decode(data)
+            if len(raw) <= MAX_PART_BYTES:
+                text = raw.decode('utf-8', errors='ignore')
+                key  = 'plain' if mime == "text/plain" else 'html'
+                collected[key] += text + "\n"
+
+        # 2) PDF attachments (only if listed in allowed_attachments)
+        elif fn.endswith('.pdf') and fn in allowed_attachments and 'attachmentId' in body:
+            att = safe_execute(lambda:
+                service.users()
+                       .messages()
+                       .attachments()
+                       .get(userId='me', messageId=msg_id, id=body["attachmentId"])
+            )
+            raw = base64.urlsafe_b64decode(att.get('data', ''))
+            if len(raw) <= MAX_PART_BYTES:
+                collected['pdfs'].append(raw)
+
+        # 3) Recurse into nested parts
         if 'parts' in part:
-            _walk_parts(part['parts'], service, msg_id, collected)
+            _walk_parts(part['parts'], service, msg_id, collected, allowed_attachments)
 
 
 def safe_refresh(creds, request=None, retries: int = 3, backoff: float = 1.0):
@@ -195,21 +217,42 @@ def fetch_full_message_payload(service, msg_id):
         raise
 
 
-def extract_text_from_pdf(data: bytes) -> str:
-    doc = fitz.open(stream=data, filetype='pdf')
+def _pdf_worker(pdf_bytes):
+    # 1) Drop to nobody:nogroup
+    nobody = pwd.getpwnam("nobody")
+    os.setgid(nobody.pw_gid)
+    os.setuid(nobody.pw_uid)
+
+    # 2) Enforce resource limits
+    resource.setrlimit(resource.RLIMIT_AS, (100*1024*1024, 100*1024*1024))
+    resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+
+    # 3) Now parse
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     return "\n".join(page.get_text() for page in doc)
 
 
 def get_full_message_from_payload(
     service,
-    raw: dict,
-    load_attachments: bool = False
-) -> Tuple[str, str, str, str, str, str, Optional[str], Optional[datetime]]:
+    raw: Dict,
+    load_attachments: bool = False,
+    allowed_attachments: List[str] = None
+) -> Tuple[
+    str,    # subject
+    str,    # snippet
+    str,    # full body text
+    str,    # thread_id
+    str,    # from_addr
+    str,    # to_addr
+    Optional[str],  # date_iso
+    Optional[datetime]  # msg_dt
+]:
     """
-    Now requires:
-      - service: the Gmail API client (to fetch attachments)
-      - raw: the full message dict
+    Extracts subject, snippet, full text (with optional PDF attachments), thread ID,
+    from/to addresses, ISO date, and datetime from a raw Gmail message payload.
     """
+    from email.utils import parsedate_to_datetime
+
     # 1) Headers
     headers = {h['name']: h['value'] for h in raw['payload']['headers']}
     subject   = headers.get('Subject', '(no subject)')
@@ -226,63 +269,50 @@ def get_full_message_from_payload(
         msg_dt   = None
         date_iso = None
 
-    # 3) Walk MIME parts to collect plain, html, and pdfs
+    # 3) Walk MIME parts
     collected = {'plain': '', 'html': '', 'pdfs': []}
+    payload = raw.get('payload', {})
+    parts = payload.get('parts', [payload])
 
-    def _walk(parts):
-        for part in parts:
-            mt = part.get('mimeType', '')
-            fn = part.get('filename', '')
-            body = part.get('body', {})
-            data = body.get('data')
-            if mt == 'text/plain' and data:
-                txt = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-                collected['plain'] += txt + "\n"
-            elif mt == 'text/html' and data:
-                html = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-                collected['html'] += html + "\n"
-            elif fn.lower().endswith('.pdf') and 'attachmentId' in body and load_attachments:
-                # **Use the passed-in service** here:
-                request = lambda: service.users().messages().attachments().get(userId='me', messageId=raw["id"], id=body["attachmentId"])
-                att = safe_execute(request)
-                pdf_data = base64.urlsafe_b64decode(att['data'])
-                collected['pdfs'].append(pdf_data)
-            # Recurse if nested parts
-            if 'parts' in part:
-                _walk(part['parts'])
+    # Only fetch attachments if requested
+    _walk_parts(
+        parts,
+        service,
+        raw.get('id', ''),
+        collected,
+        allowed_attachments if load_attachments else []
+    )
 
-    payload = raw['payload']
-    if payload.get('parts'):
-        _walk(payload['parts'])
-    else:
-        # single-part
-        mt   = payload.get('mimeType','')
-        data = payload.get('body',{}).get('data')
-        if mt=='text/plain' and data:
-            collected['plain'] = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-        elif mt=='text/html' and data:
-            collected['html']  = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-
-    # 4) Choose plain or fallback to stripped HTML
+    # 4) Choose plain text or fallback to stripped HTML
     if collected['plain'].strip():
         body = collected['plain']
     elif collected['html'].strip():
-        soup = BeautifulSoup(collected['html'], 'html.parser')
-        body = soup.get_text(separator='\n')
+        body = BeautifulSoup(collected['html'], 'html.parser').get_text(separator='\n')
     else:
         body = ''
 
-    # 5) Append PDF text
-    for pdf in collected['pdfs']:
+    # 5) Append PDF text (if any), sandbox responsibly
+    for pdf_bytes in collected['pdfs']:
         try:
-            doc = fitz.open(stream=pdf, filetype='pdf')
-            text = "\n".join(page.get_text() for page in doc)
+            text = extract_pdf_text_sandboxed(pdf_bytes)
             body += "\n" + text
         except Exception:
-            pass
+            continue
 
-    # 6) Snippet
+    # 6) Snippet (first 200 chars, single-line)
     snippet = (body[:200] + '…') if len(body) > 200 else body
-    snippet = snippet.replace('\n',' ')
+    snippet = snippet.replace('\n', ' ')
 
     return subject, snippet, body, thread_id, from_addr, to_addr, date_iso, msg_dt
+
+def extract_pdf_text_sandboxed(pdf_bytes: bytes, timeout: float = 10.0) -> str:
+    with multiprocessing.Pool(1) as pool:
+        result = pool.apply_async(_pdf_worker, (pdf_bytes,))
+        try:
+            return result.get(timeout=timeout)
+        except multiprocessing.TimeoutError:
+            pool.terminate()
+            raise RuntimeError("PDF extraction timed out")
+        except Exception as e:
+            pool.terminate()
+            raise RuntimeError(f"PDF extraction failed: {e!r}")
