@@ -13,8 +13,7 @@ from smolagents.models import OpenAIServerModel
 from .config             import AGENT_ALWAYS_ASK_HUMAN
 from .config     import LLAMA_SERVER_MODEL, LLAMA_SERVER_URL
 from .config_private     import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP
-from .calendar_client    import create_calendar_event, get_calendar_service
-from .gmail_client       import get_service, fetch_full_message_payload, get_full_message_from_payload
+from .gmail_client       import get_service, fetch_full_message_payload, get_full_message_from_payload, create_calendar_event, get_calendar_service
 from .db                 import get_conn
 from .telegram_message   import send_telegram, send_telegram_with_buttons
 from .telegram_listener  import fetch_latest_user_reply
@@ -294,14 +293,15 @@ class TelegramUserTool(Tool):
 
 class TelegramReminderTool(Tool):
     name = "remind_user"
-    description = "Send the user a reminder through telegram."
+    description = "Send an immediate reminder or alert to the user through telegram."
     inputs = {
-        "text": {"type":"string","description":"Brief reminder summary."}
+        "text": {"type":"string","description":"Brief reminder or alert summary."}
     }
     output_type = "string"
 
     def forward(self, text: str) -> str:
-        send_telegram(text)
+        message = f"⏰ *Reminder*\n\n{text}"
+        send_telegram(message, html=False)
 
 
 def handle_action(rec: dict):
