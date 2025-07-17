@@ -5,7 +5,6 @@ import pwd
 import resource
 
 from bs4 import BeautifulSoup
-from email.utils import parsedate_to_datetime
 from googleapiclient.discovery import build
 from google.oauth2.credentials  import Credentials
 from google.auth.transport.requests import Request
@@ -13,6 +12,7 @@ from google_auth_oauthlib.flow  import InstalledAppFlow
 from google.auth.exceptions     import RefreshError
 from google.auth.exceptions   import TransportError
 from googleapiclient.errors   import HttpError
+
 
 import time
 import logging
@@ -25,6 +25,7 @@ import multiprocessing
 from .config_private import ACCOUNTS
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES_CALENDAR = ['https://www.googleapis.com/auth/calendar.events']
 
 def get_service(credentials_file: str, token_file: str):
     creds = None
@@ -79,6 +80,13 @@ def ensure_tokens() -> bool:
         # This call will open your browser (or console) to complete the OAuth flow
         get_service(acct["credentials_file"], acct["token_file"])
         logging.info("✓ Token saved to %s", acct["token_file"])
+    
+    # Calendar
+    if "calendar_credentials_file" in ACCOUNTS[0] and ACCOUNTS[0]["calendar_credentials_file"] != "":
+        get_calendar_service(
+            ACCOUNTS[0]["calendar_credentials_file"],
+            ACCOUNTS[0]["calendar_token_file"]
+        )
 
     print(f"\nCreated {len(missing)} new token file(s).")
     print("Please re-run this script now that all tokens exist.")
@@ -316,3 +324,43 @@ def extract_pdf_text_sandboxed(pdf_bytes: bytes, timeout: float = 10.0) -> str:
         except Exception as e:
             pool.terminate()
             raise RuntimeError(f"PDF extraction failed: {e!r}")
+        
+
+
+def get_calendar_service(credentials_file: str, token_file: str):
+    creds = None
+    if os.path.exists(token_file):
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES_CALENDAR)
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(token_file,'w') as f: f.write(creds.to_json())
+        except RefreshError:
+            os.remove(token_file)
+            creds = None
+
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            credentials_file, SCOPES_CALENDAR
+        )
+        creds = flow.run_local_server(port=0, access_type='offline', prompt='consent')
+        with open(token_file,'w') as f: f.write(creds.to_json())
+
+    return build('calendar', 'v3', credentials=creds)
+
+
+def create_calendar_event(
+    service,
+    summary: str,
+    description: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    timezone: str = 'UTC'
+):
+    event = {
+        'summary': summary,
+        'description': description,
+        'start':   {'dateTime': start_dt.isoformat(), 'timeZone': timezone},
+        'end':     {'dateTime': end_dt.isoformat(),   'timeZone': timezone},
+    }
+    return service.events().insert(calendarId='primary', body=event).execute()
