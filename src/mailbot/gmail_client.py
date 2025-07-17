@@ -24,7 +24,8 @@ import multiprocessing
 
 from .config_private import ACCOUNTS
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly',
+          'https://www.googleapis.com/auth/gmail.modify']
 SCOPES_CALENDAR = ['https://www.googleapis.com/auth/calendar.events']
 
 def get_service(credentials_file: str, token_file: str):
@@ -70,24 +71,25 @@ def ensure_tokens() -> bool:
     for acct in ACCOUNTS:
         if not os.path.exists(acct["token_file"]):
             missing.append(acct)
+    
+    
+    if ACCOUNTS[0]["calendar_credentials_file"] != "" and not os.path.exists(ACCOUNTS[0]["calendar_token_file"]):
+        logging.info("→ Generating Calendar OAuth token for ...%s ", email)
+        get_calendar_service(
+            ACCOUNTS[0]["calendar_credentials_file"],
+            ACCOUNTS[0]["calendar_token_file"]
+        )
 
     if not missing:
         return True
 
     for acct in missing:
         email = acct["email"]
-        logging.info("→ Generating OAuth token for %s …", email)
+        logging.info("→ Generating OAuth token for %s ...", email)
         # This call will open your browser (or console) to complete the OAuth flow
         get_service(acct["credentials_file"], acct["token_file"])
         logging.info("✓ Token saved to %s", acct["token_file"])
     
-    # Calendar
-    if "calendar_credentials_file" in ACCOUNTS[0] and ACCOUNTS[0]["calendar_credentials_file"] != "":
-        get_calendar_service(
-            ACCOUNTS[0]["calendar_credentials_file"],
-            ACCOUNTS[0]["calendar_token_file"]
-        )
-
     print(f"\nCreated {len(missing)} new token file(s).")
     print("Please re-run this script now that all tokens exist.")
     return False

@@ -12,30 +12,24 @@ from smolagents.models import OpenAIServerModel
 
 from .config             import AGENT_ALWAYS_ASK_HUMAN
 from .config     import LLAMA_SERVER_MODEL, LLAMA_SERVER_URL
-from .config_private     import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP
+from .config_private     import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP, USER_PERSONAL_IGNORE_CLAUSE, TIMEZONE
 from .gmail_client       import get_service, fetch_full_message_payload, get_full_message_from_payload, create_calendar_event, get_calendar_service
 from .db                 import get_conn
 from .telegram_message   import send_telegram, send_telegram_with_buttons
 from .telegram_listener  import fetch_latest_user_reply
 
-# In‐memory record of which (tool, id) have been confirmed
 USER_CONFIRMATIONS: dict[tuple[str, str], bool] = {}
-TOOL_RESULTS: dict[tuple[str, str], Any] = {}
 
-# ──────────────────────────────────────────────────────────────
-# 1) The human‐ask tool (blocks until user replies)
-# ──────────────────────────────────────────────────────────────
+def _needs_permission_tag() -> str:
+    return " NEEDS_USER_PERMISSION" if AGENT_ALWAYS_ASK_HUMAN else ""
+
 class AskUserYesNoTool(Tool):
     name = "ask_user_yes_no"
     description = "Ask the user a yes/no question via Telegram inline buttons."
     inputs = {
         "tool": {
             "type": "string",
-            "description": "Name of the tool to confirm (e.g. gmail_mark_spam)."
-        },
-        "identifier": {
-            "type": "string",
-            "description": "The object id (e.g. message ID or event datetime)."
+            "description": "Name of the tool to confirm (e.g. draft_reply)."
         },
         "details": {
             "type": "string",
@@ -45,7 +39,11 @@ class AskUserYesNoTool(Tool):
     }
     output_type = "boolean"
 
-    def forward(self, tool: str, identifier: str, details: str) -> bool:
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
+
+    def forward(self, tool: str, details: str) -> bool:
         """
         Send a confirmation prompt; if `details` == `identifier`, auto-fetch email headers.
         Blocks until the user clicks Yes/No.
@@ -53,7 +51,7 @@ class AskUserYesNoTool(Tool):
         conn = get_conn()
         row = conn.execute(
             "SELECT from_addr, subject FROM emails WHERE msg_id = ?",
-            (identifier,)
+            (self.msg_id,)
         ).fetchone()
         if row:
             frm, subj = row
@@ -65,7 +63,7 @@ class AskUserYesNoTool(Tool):
             f"📰 Subject: {subj}\n"
             f"{details}\n\n"
             f"Tool: {tool}\n"
-            f"Msg ID: {identifier}\n"
+            f"Msg ID: {self.msg_id}\n"
             "Proceed? ✅ Yes / ❌ No"
         )
 
@@ -84,58 +82,49 @@ class AskUserYesNoTool(Tool):
             if choice in ("yes", "no"):
                 approved = (choice == "yes")
                 if approved:
-                    USER_CONFIRMATIONS[tool, identifier] = True
+                    USER_CONFIRMATIONS[tool, self.msg_id] = True
                     return True
                 else:
-                    USER_CONFIRMATIONS[tool, identifier] = False
+                    USER_CONFIRMATIONS[tool, self.msg_id] = False
                     return False
             time.sleep(1)
 
-# ──────────────────────────────────────────────────────────────
-# 2) Irreversible tools that enforce the ask‐first policy
-# ──────────────────────────────────────────────────────────────
 
-def _needs_permission_tag() -> str:
-    return " NEEDS_USER_PERMISSION" if AGENT_ALWAYS_ASK_HUMAN else ""
-
-# TODO: This requires gmail api modify scope which we set in gmail_client.py
 class GmailMarkSpamTool(Tool):
     name = "gmail_mark_spam"
     description = (
-        "Mark a Gmail message as spam given its message ID."
+        "Mark a Gmail message as spam."
     )
     inputs = {
-        "msg_id": {
-            "type": "string",
-            "description": "Gmail message ID to mark as spam."
-        }
     }
     output_type = "string"
 
-    def forward(self, msg_id: str) -> str:
-        acct_email = get_email_address(msg_id)
 
-        # 3) Find that account's credentials
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
+
+
+    def forward(self) -> str:
+        acct_email = get_email_address(self.msg_id)
         acct = next((a for a in ACCOUNTS if a["email"] in acct_email), None)
         if not acct:
             return f"ERROR: No configured account for {acct_email}"
 
 
         svc = get_service(acct["credentials_file"], acct["token_file"])
-        http = getattr(svc, "_http", None)   # this is the underlying httplib2.Http
+        http = getattr(svc, "_http", None)
 
         try:
-            # your API call
             svc.users().messages().modify(
                 userId="me",
-                id=msg_id,
+                id=self.msg_id,
                 body={"addLabelIds": ["SPAM"]}
             ).execute()
-            return f"Message {msg_id} marked as SPAM."
+            return f"Message {self.msg_id} marked as SPAM."
         except Exception as e:
             print("Exception occurred: ", e)
         finally:
-            # make sure any open connections get closed
             if http is not None and hasattr(http, "connections"):
                 http.connections.clear()
                 
@@ -147,29 +136,28 @@ class UnsubscribeTool(Tool):
         "Searches the full email body for unsub link and clicks it if it exists."
         + _needs_permission_tag()
     )
-    inputs = {
-        "msg_id": {
-            "type": "string",
-            "description": "Gmail message ID to unsubscribe from."
-        }
-    }
+    inputs = {}
     output_type = "string"
 
-    def forward(self, msg_id: str) -> str:
-        key = (self.name, msg_id)
+
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
+
+
+    def forward(self) -> str:
+        key = (self.name, self.msg_id)
         if AGENT_ALWAYS_ASK_HUMAN and not USER_CONFIRMATIONS.get(key, False):
-            return f"ERROR: Missing user confirmation for {self.name} on {msg_id}"
+            return f"ERROR: Missing user confirmation for {self.name} on {self.msg_id}"
 
-        acct_email = get_email_address(msg_id)
-
-        # 3) Find that account's credentials
+        acct_email = get_email_address(self.msg_id)
         acct = next((a for a in ACCOUNTS if a["email"] == acct_email), None)
         if not acct:
             return f"ERROR: No configured account for {acct_email}"
 
         svc = get_service(acct["credentials_file"], acct["token_file"])
 
-        raw = fetch_full_message_payload(svc, msg_id)
+        raw = fetch_full_message_payload(svc, self.msg_id)
         html_body = get_full_message_from_payload(svc, raw)[2]
         match = re.search(r'href="([^"]+unsubscribe[^"]+)"', html_body, re.I)
         if match:
@@ -201,71 +189,97 @@ class GmailCreateEventTool(Tool):
     }
     output_type = "string"
 
+
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
+
+
     def forward(self, title: str, description: str, dt_str: str) -> str:
-        key = (self.name, title + dt_str)
+        key = (self.name, self.msg_id)
         if AGENT_ALWAYS_ASK_HUMAN and not USER_CONFIRMATIONS.get(key, False):
-            return f"ERROR: Missing user confirmation for {self.name} on {title}@{dt_str}"
+            return f"ERROR: Missing user confirmation for {self.name} on {self.msg_id}"
 
-        svc = get_calendar_service(
-            ACCOUNTS[0]["calendar_credentials_file"],
-            ACCOUNTS[0]["calendar_token_file"]
-        )
         start_dt = datetime.fromisoformat(dt_str)
-        end_dt   = start_dt + timedelta(minutes=30)
-        ev = create_calendar_event(
-            svc, summary=title,
-            description=description,
-            start_dt=start_dt,
-            end_dt=end_dt
-        )
-        link = ev.get("htmlLink", "")
-        return f"Event created: {link}"
 
+        end_dt = start_dt + timedelta(minutes=30)
+
+        event_body = {
+            "summary":     title,
+            "description": description or f"Event for email {self.msg_id}",
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": TIMEZONE,
+            },
+            "end": {
+                "dateTime": end_dt.isoformat(),
+                "timeZone": TIMEZONE,
+            },
+            "reminders": {
+                "useDefault": True
+            }
+        }
+
+        acct = ACCOUNTS[0]
+        svc  = get_calendar_service(
+            acct["calendar_credentials_file"],
+            acct["calendar_token_file"]
+        )
+
+        created = svc.events().insert(calendarId="primary", body=event_body).execute()
+        link = created.get("htmlLink", "")
+        return f"Event created: {link}"
+        
 class ScheduleReminderTool(Tool):
     name = "schedule_reminder"
     description = (
-        "Create a calendar event that acts as a reminder X days before the deadline."
+        "Create a calendar event that acts as a reminder X hours before a future deadline."
         + _needs_permission_tag()
     )
     inputs = {
-        "msg_id":     {"type":"string","description":"Gmail message ID."},
         "title":      {"type":"string","description":"Reminder title."},
-        "dt_str":     {"type":"string","description":"ISO datetime (deadline)."},
-        "lead_minutes": {"type":"integer","description":"Trigger reminder lead_minutes minutes before dealine."}
+        "deadline":   {"type":"string","description":"ISO datetime (deadline)."},
+        "lead_hours": {"type":"integer","description":"How many hours before deadline to be reminded."},
     }
     output_type = "string"
 
-    def forward(self, msg_id: str, title: str, dt_str: str, lead_minutes: int) -> str:
 
-        # parse the deadline
-        deadline = datetime.fromisoformat(dt_str)
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
 
-        start = deadline
-        end   = deadline + timedelta(minutes=30)
+    def forward(self, title: str, deadline: str, lead_hours: int) -> str:
+        key = (self.name, self.msg_id)
+        if AGENT_ALWAYS_ASK_HUMAN and not USER_CONFIRMATIONS.get(key, False):
+            return f"ERROR: Missing user confirmation for {self.name} on {self.msg_id}"
+        # parse ISO timestamp
+        start_dt = datetime.fromisoformat(deadline)
+        end_dt   = start_dt + timedelta(minutes=30)
 
         event_body = {
-            "summary": title,
-            "description": f"Reminder for email {msg_id}",
-            "start": {"dateTime": start.isoformat()},
-            "end":   {"dateTime": end.isoformat()},
+            "summary":     title,
+            "description": f"Reminder for email {self.msg_id}",
+            "start": {
+                "dateTime": start_dt.isoformat(),
+                "timeZone": TIMEZONE,
+            },
+            "end": {
+                "dateTime": end_dt.isoformat(),
+                "timeZone": TIMEZONE,
+            },
             "reminders": {
                 "useDefault": False,
                 "overrides": [
-                    {"method": "email", "minutes": lead_minutes}
+                    {"method": "email",  "minutes": lead_hours * 60},
+                    {"method": "popup",  "minutes": lead_hours * 60},
+
                 ]
             }
         }
 
-        acct_email = get_email_address(msg_id)
-
-        # look up the right Google Calendar credentials for this account
-        acct = next((a for a in ACCOUNTS if a["email"] in acct_email), None)
-        if not acct:
-            return f"ERROR: no calendar config for {acct_email}"
-
         svc = get_calendar_service(
-            acct["calendar_credentials_file"],
-            acct["calendar_token_file"]
+            ACCOUNTS[0]["calendar_credentials_file"],
+            ACCOUNTS[0]["calendar_token_file"]
         )
 
         ev = svc.events().insert(calendarId="primary", body=event_body).execute()
@@ -306,10 +320,10 @@ class TelegramReminderTool(Tool):
 
 def handle_action(rec: dict):
     tools = [
-        AskUserYesNoTool(),
-        GmailMarkSpamTool(),
-        GmailCreateEventTool(),
-        ScheduleReminderTool(),
+        AskUserYesNoTool(rec['msg_id']),
+        GmailMarkSpamTool(rec['msg_id']),
+        GmailCreateEventTool(rec['msg_id']),
+        ScheduleReminderTool(rec['msg_id']),
         DuckDuckGoSearchTool(),
         TelegramUserTool(),
         TelegramReminderTool(),
@@ -344,7 +358,8 @@ def handle_action(rec: dict):
         "simply do nothing and consider your task complete.\n"
         "Pay close attention to the tool-responses as you do step-wise processing.\n"
         "For example, if you decide to ask the user a question in a former step, "
-        "the answer will be provided in the tool-response's text Observation or Execution logs.\n"
+        "the answer will be provided in the tool-response's text Observation or Execution logs.\n\n"
+        "{USER_PERSONAL_IGNORE_CLAUSE}\n"
         "Finally - remember you may only answer in the form:\n"
         "Code:\n"  
         "```python\n"  

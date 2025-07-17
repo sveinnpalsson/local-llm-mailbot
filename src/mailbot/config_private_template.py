@@ -21,6 +21,8 @@ ACCOUNTS = [
     }
 ]
 
+TIMEZONE = "America/New_York" # Your timezone
+
 # This gets injected into the system prompt to provide the LLM personal context
 USER_PROFILE_LLM_PROMPT = ""
 USER_PROFILE_LLM_PROMPT_DEEP = "" # For "deep" analysis
