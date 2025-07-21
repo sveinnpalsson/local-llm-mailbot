@@ -6,15 +6,15 @@ import requests
 from datetime import datetime, timedelta
 from typing import Any
 
-from smolagents import CodeAgent, DuckDuckGoSearchTool, Tool
+from smolagents import CodeAgent, DuckDuckGoSearchTool, Tool, ToolCallingAgent
 from smolagents.default_tools import FinalAnswerTool
 from smolagents.models import OpenAIServerModel
 
 from .config             import AGENT_ALWAYS_ASK_HUMAN
 from .config     import LLAMA_SERVER_MODEL, LLAMA_SERVER_URL
 from .config_private     import ACCOUNTS, USER_PROFILE_LLM_PROMPT_DEEP, USER_PERSONAL_IGNORE_CLAUSE, TIMEZONE
-from .gmail_client       import get_service, fetch_full_message_payload, get_full_message_from_payload, create_calendar_event, get_calendar_service
-from .db                 import get_conn
+from .gmail_client       import get_service, fetch_full_message_payload, get_full_message_from_payload, create_calendar_event, get_calendar_service, send_email_via_gmail
+from .db                 import get_conn, load_raw_message, get_message_history, get_contact_profile
 from .telegram_message   import send_telegram, send_telegram_with_buttons
 from .telegram_listener  import fetch_latest_user_reply
 
@@ -127,7 +127,137 @@ class GmailMarkSpamTool(Tool):
         finally:
             if http is not None and hasattr(http, "connections"):
                 http.connections.clear()
-                
+
+
+class SendEmailTool(Tool):
+    name = "send_email"
+    description = "Send an email message."
+    inputs = {
+        "to":      {"type": "string", "description": "Recipient address"},
+        "subject": {"type": "string", "description": "Email subject"},
+        "body":    {"type": "string", "description": "Email body"},
+        "is_reply": {"type": "boolean", "description": "If true, send as a reply in the same thread"},
+    }
+    output_type = "string"
+
+    def __init__(self, msg_id: str):
+        super().__init__()
+        self.msg_id = msg_id
+
+    def forward(self, to: str, subject: str, body: str, is_reply: str) -> str:
+        # choose same account as original
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT to_addr, thread_id FROM emails WHERE msg_id = ?",
+             (self.msg_id,)
+        ).fetchone()
+        to_addr, thread_id = row
+        acct = next(a for a in ACCOUNTS if a["email"] == to_addr)
+
+        svc = get_service(acct["credentials_file"], acct["token_file"])
+
+        send_email_via_gmail(
+            service=svc,
+            to=to,
+            subject=subject,
+            body=body,
+            thread_id=(thread_id if is_reply else None),
+            reply_to_msg_id=(self.msg_id if is_reply else None),
+        )
+        return f"Email sent to {to}."
+
+
+# ——— Sub‑agents (managed) ————————————————————————————
+
+def build_web_search_agent() -> ToolCallingAgent:
+    """
+    A small agent that takes a 'query' and uses DuckDuckGoSearchTool
+    to return a summary via FinalAnswerTool.
+    """
+    tools = [
+        DuckDuckGoSearchTool(),
+        FinalAnswerTool(name="search_complete", description="Return search summary")
+    ]
+    model = OpenAIServerModel(model_id=LLAMA_SERVER_MODEL, api_base=LLAMA_SERVER_URL)
+    return ToolCallingAgent(
+        tools=tools,
+        model=model,
+        name="web_search_agent",
+        description="Performs web searches and summarizes results."
+    )
+
+
+def build_draft_reply_agent(msg_id: str, thread_id: str) -> ToolCallingAgent:
+    """
+    Agent that drafts a reply to the email identified by msg_id within its thread.
+    Includes:
+      - Sender profile
+      - Last N messages in the same thread (excluding this one)
+      - Full body of this email
+      - Tools for web search and clarifications
+    """
+    conn = get_conn()
+    
+    # 1) Full email body
+    raw = load_raw_message(conn, mid)
+
+
+    # 2) Sender profile
+    profile = get_contact_profile(conn, frm) or {}
+
+    # 3) Thread history (exclude current msg_id)
+    history = get_message_history(conn, thread_id, limit=5, exclude_msg_id=msg_id)
+
+    # --- Build system prompt ---
+    system_prompt = (
+        f"You are drafting a reply *on behalf of the user* to an email in thread {thread_id}.\n\n"
+        f"✉️ Sender: {frm}\n"
+        f"Profile: {profile}\n\n"
+        f"📜 Thread history (most recent first):\n"
+    )
+    if history:
+        for date, snippet in history:
+            system_prompt += f"- {date}: {snippet}\n"
+    else:
+        system_prompt += "(no prior messages in this thread)\n"
+    system_prompt += (
+        "\nFull email body to reply to:\n"
+        "----------\n"
+        f"{body}\n"
+        "----------\n\n"
+        "Please draft a polite, concise reply that:\n"
+        "1. Acknowledges the sender’s key points\n"
+        "2. Answers any questions asked\n"
+        "3. Follows the user’s style and respects tone\n\n"
+        "If you need factual information, use DuckDuckGoSearchTool.\n"
+        "If you need a yes/no clarification, use AskUserYesNoTool.\n"
+        "If you need open‑ended clarifications, use TelegramUserTool.\n"
+        "When your draft is ready, return it via the `draft_complete` FinalAnswerTool."
+    )
+
+    tools: list[Tool] = [
+        DuckDuckGoSearchTool(),
+        AskUserYesNoTool(msg_id),
+        TelegramUserTool(),
+        FinalAnswerTool(
+            name="draft_complete",
+            description="Return the drafted reply as a string"
+        ),
+    ]
+
+    model = OpenAIServerModel(
+        model_id=LLAMA_SERVER_MODEL,
+        api_base=LLAMA_SERVER_URL,
+    )
+
+    return ToolCallingAgent(
+        tools=tools,
+        model=model,
+        name="draft_reply_agent",
+        description="Draft a context‑aware reply to an email thread.",
+        system_prompt=system_prompt,
+    )
+
 # TODO: not currently using this tool because it involves a get request to a link found in the email body. 
 #       Nees to be revised with security in mind.
 class UnsubscribeTool(Tool): 
@@ -319,26 +449,34 @@ class TelegramReminderTool(Tool):
 
 
 def handle_action(rec: dict):
+    msg_id = rec['msg_id']
+
     tools = [
-        AskUserYesNoTool(rec['msg_id']),
-        GmailMarkSpamTool(rec['msg_id']),
-        GmailCreateEventTool(rec['msg_id']),
-        ScheduleReminderTool(rec['msg_id']),
-        DuckDuckGoSearchTool(),
+        AskUserYesNoTool(msg_id),
+        GmailMarkSpamTool(msg_id),
+        GmailCreateEventTool(msg_id),
+        ScheduleReminderTool(msg_id),
+        SendEmailTool(msg_id),
         TelegramUserTool(),
         TelegramReminderTool(),
         FinalAnswerTool(name="final_answer", description="Return the final answer to the user"),
     ]
 
+    # Build sub‑agents
+    managed_agents = [
+        build_web_search_agent(),
+        build_draft_reply_agent(msg_id),
+    ]
     model = OpenAIServerModel(
         model_id=LLAMA_SERVER_MODEL,
         api_base=LLAMA_SERVER_URL,
     )
     agent = CodeAgent(
         tools=tools,
+        managed_agents=managed_agents,
         model=model,
-        max_steps=5,
-        verbosity_level=1
+        max_steps=6,
+        verbosity_level=2,
     )
     prompt = (
         f"You are an autonomous assistant for a user with profile:\n"
@@ -359,7 +497,7 @@ def handle_action(rec: dict):
         "Pay close attention to the tool-responses as you do step-wise processing.\n"
         "For example, if you decide to ask the user a question in a former step, "
         "the answer will be provided in the tool-response's text Observation or Execution logs.\n\n"
-        "{USER_PERSONAL_IGNORE_CLAUSE}\n"
+        f"{USER_PERSONAL_IGNORE_CLAUSE}\n"
         "Finally - remember you may only answer in the form:\n"
         "Code:\n"  
         "```python\n"  

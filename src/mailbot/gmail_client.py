@@ -21,6 +21,7 @@ import http.client
 from typing            import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 import multiprocessing
+from email.mime.text import MIMEText
 
 from .config_private import ACCOUNTS
 
@@ -366,3 +367,40 @@ def create_calendar_event(
         'end':     {'dateTime': end_dt.isoformat(),   'timeZone': timezone},
     }
     return service.events().insert(calendarId='primary', body=event).execute()
+
+
+
+def send_email_via_gmail(
+    service,
+    to: str,
+    subject: str,
+    body: str,
+    thread_id: str | None = None,
+    reply_to_msg_id: str | None = None,
+):
+    """
+    Send a new message or a reply via Gmail API.
+    - If thread_id is provided, the message is sent into that thread.
+    - If reply_to_msg_id is provided, adds In-Reply-To & References headers.
+    """
+    # Build RFC 2822 email
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["to"] = to
+    msg["subject"] = subject
+    if thread_id:
+        msg["threadId"] = thread_id
+    if reply_to_msg_id:
+        msg["In-Reply-To"] = reply_to_msg_id
+        msg["References"] = reply_to_msg_id
+
+    raw_bytes = base64.urlsafe_b64encode(msg.as_bytes())
+    raw_str = raw_bytes.decode("utf-8")
+
+    send_body: dict[str, Any] = {"raw": raw_str}
+    if thread_id:
+        send_body["threadId"] = thread_id
+
+    return service.users().messages().send(
+        userId="me",
+        body=send_body
+    ).execute()
