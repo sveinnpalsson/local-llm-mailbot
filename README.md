@@ -2,11 +2,11 @@
 
 **Local LLM Mailbot** is a private, local AI assistant for managing your email, calendar, and reminders. It uses a one-time profile build of your contacts based on your email history, then continuously listens to your inbox—classifying messages, scheduling events, sending notifications via Telegram and potentially completes more tasks (under development). All data is encrypted locally and processed with a LLM of your choice (e.g. I run Qwen3-14B_Q4_K_M on a RTX3090 card).
 
-> ⚠️ **Disclaimer:** This is a **proof-of-concept** and **not** production-grade software. Use at your own risk. The project is under active development and contains several TODOs.
+> **Disclaimer:** This is a **proof-of-concept** and **not** production-grade software. Use at your own risk. The project is under active development and contains several TODOs.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 - **One-Time Profile Builder**  
   Run `profile_builder.py` once to scan your Gmail INBOX/SENT threads. Generates a JSON “profile” for each contact (role, topics, tone, etc.) and saves it in the encrypted database.
@@ -37,7 +37,7 @@
 
 ---
 
-## 📋 Prerequisites
+## Prerequisites
 
 - **OS:** Linux (WSL2/Ubuntu) with NVIDIA GPU & CUDA  
 - **Python:** 3.11  
@@ -47,7 +47,7 @@
 
 ---
 
-## ⚙️ Setup Instructions
+## Setup Instructions
 
 1. **Clone & install**  
    ```  
@@ -84,7 +84,7 @@
 
 ---
 
-## 🚦 Usage
+## Usage
 
 
 1. **Start LLM Server**  
@@ -104,14 +104,14 @@ Logs will show classification/scheduling steps and Telegram notifications when t
 
 ---
 
-## 🛠 Development Notes
+## Development Notes
 
 - **Status:** Active development; many features marked TODO (e.g. end-to-end Telegram encryption, live contact updates).  
 - **Extensibility:** The `task_agnets.py` framework lets you add new “tools” (RSS, Slack, etc.) for the agent to invoke.  
 
 ---
 
-## 📜 License
+## License
 
 Released under the **MIT License** (see `LICENSE`). All dependencies are MIT or Apache-2.0-compatible.
 
