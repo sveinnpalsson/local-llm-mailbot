@@ -37,19 +37,6 @@ def get_conn():
       message_count INTEGER DEFAULT 0,
       profile_json  TEXT
     );
-    CREATE TABLE IF NOT EXISTS tasks (
-      task_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      msg_id         TEXT     NOT NULL,
-      type           TEXT     NOT NULL,        -- 'event' or 'reminder'
-      title          TEXT,
-      target_date    TEXT,                     -- ISO date or datetime
-      scheduled_time DATETIME,
-      sent           INTEGER DEFAULT 0,
-      acct_email     TEXT,
-      telegram_id    TEXT
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_msg_type
-      ON tasks(msg_id, type);
 
     CREATE TABLE IF NOT EXISTS ignore_rules (
       rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,31 +63,37 @@ def cache_raw_message(conn, msg_id: str, raw_json: str):
     """, (msg_id, raw_json))
     conn.commit()
 
-def add_task(conn, msg_id, kind, title, target_date, acct_email, scheduled_time):
+def get_message_history(
+    conn,
+    thread_id: str,
+    limit: int = 5,
+    exclude_msg_id: str | None = None
+) -> list[tuple[str, str]]:
     """
-    Inserts a new task only if one doesn't already exist for msg_id+kind.
-    Returns True if it was inserted (i.e. first time), False otherwise.
+    Fetch the most recent `limit+1` messages in the given thread (by date desc),
+    then drop `exclude_msg_id` if present, and return up to `limit` entries as
+    (date, snippet) tuples.
     """
-    cur = conn.execute("""
-      INSERT OR IGNORE INTO tasks
-       (msg_id, type, title, target_date, acct_email, scheduled_time)
-      VALUES (?, ?, ?, ?, ?, ?)
-    """, (msg_id, kind, title, target_date, acct_email, scheduled_time.isoformat()))
-    conn.commit()
-    return cur.rowcount == 1
+    cur = conn.execute(
+        """
+        SELECT msg_id, date, snippet
+          FROM emails
+         WHERE thread_id = ?
+         ORDER BY date DESC
+         LIMIT ?
+        """,
+        (thread_id, limit + (1 if exclude_msg_id else 0),)
+    )
+    rows = cur.fetchall()
+    # filter out the current message itself
+    filtered = [
+        (date, snippet)
+        for (mid, date, snippet) in rows
+        if mid != exclude_msg_id
+    ]
+    # trim to requested limit
+    return filtered[:limit]
 
-def get_due_tasks(conn, now):
-    rows = conn.execute("""
-      SELECT task_id, type, title, target_date, acct_email
-        FROM tasks
-       WHERE sent = 0
-         AND scheduled_time <= ?
-    """, (now.isoformat(),)).fetchall()
-    return rows
-
-def mark_task_sent(conn, task_id):
-    conn.execute("UPDATE tasks SET sent = 1 WHERE task_id = ?", (task_id,))
-    conn.commit()
 
 def get_ignore_rules(conn):
     return [r[0] for r in conn.execute("SELECT pattern FROM ignore_rules")]
@@ -191,12 +184,6 @@ def get_seen_ids(conn):
 def reset_emails_table():
     conn = get_conn()
     cur = conn.execute("DROP TABLE IF EXISTS emails;")
-    conn.commit()
-    conn.close()
-
-def reset_tasks_table():
-    conn = get_conn()
-    cur = conn.execute("DROP TABLE IF EXISTS tasks;")
     conn.commit()
     conn.close()
 
