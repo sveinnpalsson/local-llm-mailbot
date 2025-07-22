@@ -23,6 +23,7 @@ from .gmail_client     import (
     fetch_message_ids,
     fetch_messages,
     get_full_message_from_payload,
+    parse_address_header
 )
 
 logging.basicConfig(
@@ -80,9 +81,11 @@ def build_profiles(account):
         raw = ensure_raw_cached(svc, conn, mid)
         hdrs = {h['name']: h['value'] for h in raw['payload']['headers']}
         dt   = parsedate_to_datetime(hdrs.get('Date'))
-        frm  = hdrs.get('From','')
+        frm  = hdrs.get('From', '')
+        from_list = parse_address_header(frm)
+        from_name, from_addr = (from_list[0] if from_list else ("", frm))
         tos  = [t.strip() for t in hdrs.get('To','').split(',')]
-        update_contact(conn, frm, dt)
+        update_contact(conn, from_addr, dt)
         for t in tos:
             update_contact(conn, t, dt)
 
@@ -116,7 +119,7 @@ def build_profiles(account):
             for m in msgs_sorted:
                 mid = m['id']
                 raw = ensure_raw_cached(svc, conn, mid)
-                subj, snip, body, _, _, _, _, _ = \
+                subj, snip, body, _, _, _, _, _, _, _ = \
                     get_full_message_from_payload(svc, raw)
                 hdrs = {h['name']:h['value'] for h in raw['payload']['headers']}
                 role = "You" if me in hdrs.get('From','') else email

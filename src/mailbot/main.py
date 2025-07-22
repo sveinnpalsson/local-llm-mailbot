@@ -1,9 +1,6 @@
 import json
 import logging
-import os
 import time
-from collections import defaultdict
-from datetime import date, datetime, timedelta
 
 from googleapiclient.errors import HttpError
 from tqdm import tqdm
@@ -11,21 +8,17 @@ from tqdm import tqdm
 from .classifier         import deep_analyze, initial_classify
 from .config             import (
     DEEP_THRESHOLD_IMPORTANCE,
-    DB_PASSWORD,
     NUM_MESSAGES_LOOKBACK,
     MIN_IMPORTANCE_FOR_ALERT,
-    PLANNING_INTERVAL_HOURS,
     POLL_INTERVAL_SECONDS,
 )
 from .config_private     import ACCOUNTS
 from .db                 import (
-    add_task,
     cache_raw_message,
     get_contact_profile,
     get_conn,
     load_raw_message,
     mark_email,
-    mark_task_sent,
     set_contact_profile
 )
 from .gmail_client       import (
@@ -73,7 +66,7 @@ def process_message(svc, conn, acct, mid, spammers):
     # we haven't parsed date_iso yet, so skip the spam print until after parsing
 
     # full parse
-    subject, snippet, body, thread_id, frm, to_addr, date_iso, msg_dt = \
+    subject, snippet, body, thread_id, frm_raw, frm, to_addr, date_iso, msg_dt, unsub_link = \
         get_full_message_from_payload(svc, raw)
 
     # now we know date_iso—spam skip print:
@@ -148,6 +141,7 @@ def process_message(svc, conn, acct, mid, spammers):
 
 
     # Update contact profile
+    __import__('IPython').embed()
     if update_profiles:
         updated_profile = update_contact_profile(conn, frm, rec)
         if updated_profile:

@@ -131,7 +131,7 @@ class GmailMarkSpamTool(Tool):
 
 class SendEmailTool(Tool):
     name = "send_email"
-    description = "Send an email message."
+    description = "Send an email message." + _needs_permission_tag()
     inputs = {
         "to":      {"type": "string", "description": "Recipient address"},
         "subject": {"type": "string", "description": "Email subject"},
@@ -145,6 +145,11 @@ class SendEmailTool(Tool):
         self.msg_id = msg_id
 
     def forward(self, to: str, subject: str, body: str, is_reply: str) -> str:
+        
+        key = (self.name, self.msg_id)
+        if AGENT_ALWAYS_ASK_HUMAN and not USER_CONFIRMATIONS.get(key, False):
+            return f"ERROR: Missing user confirmation for {self.name} on {self.msg_id}"
+
         # choose same account as original
         conn = get_conn()
         row = conn.execute(
@@ -196,23 +201,24 @@ def build_draft_reply_agent(msg_id: str, thread_id: str) -> ToolCallingAgent:
       - Full body of this email
       - Tools for web search and clarifications
     """
+    acct_email = get_email_address(msg_id)
+    acct = next((a for a in ACCOUNTS if a["email"] in acct_email), None)
+    svc = get_service(acct["credentials_file"], acct["token_file"])
     conn = get_conn()
     
-    # 1) Full email body
-    raw = load_raw_message(conn, mid)
+    raw = load_raw_message(conn, msg_id)
+    _, _, body, _, frm_raw, frm, _, _, _, _ = get_full_message_from_payload(svc, raw)
 
-
-    # 2) Sender profile
     profile = get_contact_profile(conn, frm) or {}
 
-    # 3) Thread history (exclude current msg_id)
     history = get_message_history(conn, thread_id, limit=5, exclude_msg_id=msg_id)
 
     # --- Build system prompt ---
     system_prompt = (
-        f"You are drafting a reply *on behalf of the user* to an email in thread {thread_id}.\n\n"
+        f"You're a helpful agent named draft_reply_agent."
+        f"You are drafting a reply *on behalf of the user* to an email.\n\n"
         f"✉️ Sender: {frm}\n"
-        f"Profile: {profile}\n\n"
+        f" Sender Profile: {profile}\n\n"
         f"📜 Thread history (most recent first):\n"
     )
     if history:
@@ -250,13 +256,15 @@ def build_draft_reply_agent(msg_id: str, thread_id: str) -> ToolCallingAgent:
         api_base=LLAMA_SERVER_URL,
     )
 
-    return ToolCallingAgent(
+    reply_agent = ToolCallingAgent(
         tools=tools,
         model=model,
         name="draft_reply_agent",
-        description="Draft a context‑aware reply to an email thread.",
-        system_prompt=system_prompt,
+        description="An agent that specializes in drafting email replies.",
+        verbosity_level=2
     )
+    reply_agent.prompt_templates["managed_agent"]["task"] = system_prompt
+    return reply_agent
 
 # TODO: not currently using this tool because it involves a get request to a link found in the email body. 
 #       Nees to be revised with security in mind.
@@ -450,22 +458,31 @@ class TelegramReminderTool(Tool):
 
 def handle_action(rec: dict):
     msg_id = rec['msg_id']
+    thread_id = rec["thread_id"]
 
     tools = [
         AskUserYesNoTool(msg_id),
         GmailMarkSpamTool(msg_id),
         GmailCreateEventTool(msg_id),
         ScheduleReminderTool(msg_id),
-        SendEmailTool(msg_id),
         TelegramUserTool(),
         TelegramReminderTool(),
         FinalAnswerTool(name="final_answer", description="Return the final answer to the user"),
     ]
 
+    def gate_tools_cb(memory_step, agent):
+        # Only act on action steps
+        if not hasattr(memory_step, "tool_calls") or not memory_step.tool_calls:
+            return
+
+        for tc in memory_step.tool_calls:
+            if tc.name == "draft_reply_agent":        
+                agent.tools["send_email"] = SendEmailTool(msg_id)
+
     # Build sub‑agents
     managed_agents = [
         build_web_search_agent(),
-        build_draft_reply_agent(msg_id),
+        build_draft_reply_agent(msg_id, thread_id),
     ]
     model = OpenAIServerModel(
         model_id=LLAMA_SERVER_MODEL,
@@ -475,8 +492,9 @@ def handle_action(rec: dict):
         tools=tools,
         managed_agents=managed_agents,
         model=model,
-        max_steps=6,
+        max_steps=7,
         verbosity_level=2,
+        step_callbacks=[gate_tools_cb],
     )
     prompt = (
         f"You are an autonomous assistant for a user with profile:\n"

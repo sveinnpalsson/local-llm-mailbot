@@ -13,7 +13,6 @@ from google.auth.exceptions     import RefreshError
 from google.auth.exceptions   import TransportError
 from googleapiclient.errors   import HttpError
 
-
 import time
 import logging
 import ssl
@@ -22,6 +21,8 @@ from typing            import Tuple, Optional, Dict, Any, List
 from datetime import datetime
 import multiprocessing
 from email.mime.text import MIMEText
+from email.utils import getaddresses, parseaddr
+from email.header import decode_header, make_header
 
 from .config_private import ACCOUNTS
 
@@ -242,6 +243,24 @@ def _pdf_worker(pdf_bytes):
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     return "\n".join(page.get_text() for page in doc)
 
+def decode_name(name: str) -> str:
+    # Handles =?utf-8?B?...?= etc.
+    try:
+        return str(make_header(decode_header(name))).strip()
+    except Exception:
+        return name.strip()
+
+def parse_address_header(value: str) -> list[tuple[str, str]]:
+    """
+    Returns [(name, email), ...] for a header value that may contain 0..N addresses.
+    Name is decoded, email is lowercased.
+    """
+    pairs = []
+    for name, email in getaddresses([value or ""]):
+        if not email:
+            continue
+        pairs.append((decode_name(name), email.strip().lower()))
+    return pairs
 
 def get_full_message_from_payload(
     service,
@@ -253,10 +272,12 @@ def get_full_message_from_payload(
     str,    # snippet
     str,    # full body text
     str,    # thread_id
+    str,    # from_addr_raw
     str,    # from_addr
     str,    # to_addr
     Optional[str],  # date_iso
-    Optional[datetime]  # msg_dt
+    Optional[datetime],  # msg_dt
+    str,    # ubsub_link
 ]:
     """
     Extracts subject, snippet, full text (with optional PDF attachments), thread ID,
@@ -268,8 +289,16 @@ def get_full_message_from_payload(
     headers = {h['name']: h['value'] for h in raw['payload']['headers']}
     subject   = headers.get('Subject', '(no subject)')
     thread_id = raw.get('threadId', '')
-    from_addr = headers.get('From', '')
-    to_addr   = headers.get('To', '')
+    from_addr_raw = headers.get('From', '')
+    to_addr_raw   = headers.get('To', '')
+
+    from_list = parse_address_header(from_addr_raw)
+    to_list   = parse_address_header(to_addr_raw)
+
+    from_name, from_addr = (from_list[0] if from_list else ("", from_addr_raw))
+    to_name,   to_addr   = (to_list[0]   if to_list   else ("", to_addr_raw))
+
+    unsub_link = headers.get('List-Unsubscribe', '')
 
     # 2) Date parsing
     date_hdr = headers.get('Date')
@@ -314,7 +343,7 @@ def get_full_message_from_payload(
     snippet = (body[:200] + '…') if len(body) > 200 else body
     snippet = snippet.replace('\n', ' ')
 
-    return subject, snippet, body, thread_id, from_addr, to_addr, date_iso, msg_dt
+    return subject, snippet, body, thread_id, from_addr_raw, from_addr, to_addr, date_iso, msg_dt, unsub_link
 
 def extract_pdf_text_sandboxed(pdf_bytes: bytes, timeout: float = 10.0) -> str:
     with multiprocessing.Pool(1) as pool:
